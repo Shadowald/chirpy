@@ -74,6 +74,24 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	w.Write(data)
 }
 
+func validateChirp(w http.ResponseWriter, req *http.Request) {
+	type Chirp struct {
+		Body string `json:"body"`
+	}
+	decoder := json.NewDecoder(req.Body)
+	chirp := Chirp{}
+	err := decoder.Decode(&chirp)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+	if len(chirp.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+	respondWithJSON(w, http.StatusOK, true)
+}
+
 func main() {
 	apiCfg := &apiConfig{}
 	mux := http.NewServeMux()
@@ -83,23 +101,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, req *http.Request) {
-		type Chirp struct {
-			Body string `json:"body"`
-		}
-		decoder := json.NewDecoder(req.Body)
-		chirp := Chirp{}
-		err := decoder.Decode(&chirp)
-		if err != nil {
-			respondWithError(w, http.StatusBadRequest, "Invalid JSON")
-			return
-		}
-		if len(chirp.Body) > 140 {
-			respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-			return
-		}
-		respondWithJSON(w, http.StatusOK, true)
-	})
+	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileserverHits)
 	server := &http.Server{
