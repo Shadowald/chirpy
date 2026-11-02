@@ -1,8 +1,8 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
-	"strconv"
 	"sync/atomic"
 )
 
@@ -18,10 +18,15 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) getFileserverHits(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hits: "))
-	w.Write([]byte(strconv.Itoa(int(cfg.fileserverHits.Load()))))
+	template := `<html>
+  		<body>
+    		<h1>Welcome, Chirpy Admin</h1>
+    		<p>Chirpy has been visited %d times!</p>
+  		</body>
+	</html>`
+	w.Write([]byte(fmt.Sprintf(template, cfg.fileserverHits.Load())))
 }
 
 func (cfg *apiConfig) resetFileserverHits(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +45,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	mux.HandleFunc("GET /api/metrics", apiCfg.getFileserverHits)
-	mux.HandleFunc("POST /api/reset", apiCfg.resetFileserverHits)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileserverHits)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
