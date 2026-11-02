@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync/atomic"
 )
@@ -36,6 +38,42 @@ func (cfg *apiConfig) resetFileserverHits(w http.ResponseWriter, r *http.Request
 	w.Write([]byte("Metrics reset"))
 }
 
+func respondWithError(w http.ResponseWriter, statusCode int, message string) {
+	type returnVals struct {
+		Err string `json:"error"`
+	}
+	respBody := returnVals{
+		Err: message,
+	}
+	data, err := json.Marshal(respBody)
+	if err != nil {
+		log.Printf("Error marshaling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(data)
+}
+
+func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
+	type returnVals struct {
+		Valid bool `json:"valid"`
+	}
+	respBody := returnVals{
+		Valid: payload.(bool),
+	}
+	data, err := json.Marshal(respBody)
+	if err != nil {
+		log.Printf("Error marshaling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(data)
+}
+
 func main() {
 	apiCfg := &apiConfig{}
 	mux := http.NewServeMux()
@@ -44,6 +82,23 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	})
+	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, req *http.Request) {
+		type Chirp struct {
+			Body string `json:"body"`
+		}
+		decoder := json.NewDecoder(req.Body)
+		chirp := Chirp{}
+		err := decoder.Decode(&chirp)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+		if len(chirp.Body) > 140 {
+			respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+			return
+		}
+		respondWithJSON(w, http.StatusOK, true)
 	})
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileserverHits)
