@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -58,10 +59,10 @@ func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 
 func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	type returnVals struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 	respBody := returnVals{
-		Valid: payload.(bool),
+		CleanedBody: payload.(string),
 	}
 	data, err := json.Marshal(respBody)
 	if err != nil {
@@ -72,6 +73,21 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	w.Write(data)
+}
+
+func censorChirp(chirp string) string {
+	censoredWords := []string{"kerfuffle", "sharbert", "fornax"}
+	words := strings.Split(chirp, " ")
+	for _, word := range censoredWords {
+		for i, w := range words {
+			w = strings.ToLower(w)
+			if w == word {
+				words[i] = "****"
+			}
+		}
+	}
+	cleaned_chirp := strings.Join(words, " ")
+	return cleaned_chirp
 }
 
 func validateChirp(w http.ResponseWriter, req *http.Request) {
@@ -89,7 +105,8 @@ func validateChirp(w http.ResponseWriter, req *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 		return
 	}
-	respondWithJSON(w, http.StatusOK, true)
+	chirp.Body = censorChirp(chirp.Body)
+	respondWithJSON(w, http.StatusOK, chirp.Body)
 }
 
 func main() {
