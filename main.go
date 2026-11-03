@@ -1,16 +1,24 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/Shadowald/chirpy/internal/database"
+	"github.com/joho/godotenv"
+
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -110,7 +118,14 @@ func validateChirp(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	apiCfg := &apiConfig{}
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Error opening database: %v", err)
+	}
+	dbQueries := database.New(db)
+	apiCfg := &apiConfig{dbQueries: dbQueries}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
