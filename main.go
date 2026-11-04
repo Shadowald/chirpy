@@ -9,8 +9,10 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Shadowald/chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 
 	_ "github.com/lib/pq"
@@ -20,6 +22,13 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+}
+
+type User struct {
+	Id        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -89,16 +98,10 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 }
 
 func respondWithJSONUser(w http.ResponseWriter, statusCode int, payload interface{}) {
-	type returnVals struct {
-		Id        string `json:"id"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Email     string `json:"email"`
-	}
-	respBody := returnVals{
-		Id:        payload.(database.User).ID.String(),
-		CreatedAt: payload.(database.User).CreatedAt.String(),
-		UpdatedAt: payload.(database.User).UpdatedAt.String(),
+	respBody := User{
+		Id:        payload.(database.User).ID,
+		CreatedAt: payload.(database.User).CreatedAt,
+		UpdatedAt: payload.(database.User).UpdatedAt,
 		Email:     payload.(database.User).Email,
 	}
 	data, err := json.Marshal(respBody)
@@ -147,9 +150,6 @@ func validateChirp(w http.ResponseWriter, req *http.Request) {
 }
 
 func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
-	type User struct {
-		Email string `json:"email"`
-	}
 	decoder := json.NewDecoder(req.Body)
 	user := User{}
 	err := decoder.Decode(&user)
