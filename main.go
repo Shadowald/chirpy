@@ -210,6 +210,38 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, http.StatusOK, chirps)
 }
 
+func (cfg *apiConfig) getChirpById(w http.ResponseWriter, req *http.Request) {
+	// Extract the chirp ID from the URL path
+	chirpID := strings.TrimPrefix(req.URL.Path, "/api/chirps/")
+	if chirpID == "" {
+		respondWithError(w, http.StatusBadRequest, "Chirp ID is required")
+		return
+	}
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Chirp ID format")
+		return
+	}
+
+	// Retrieve the chirp from the database
+	retrievedChirp, err := cfg.dbQueries.RetrieveChirpByID(req.Context(), chirpUUID)
+	if err != nil {
+		log.Printf("Error retrieving chirp: %v", err)
+		respondWithError(w, http.StatusNotFound, "Chirp not found")
+		return
+	}
+
+	chirp := Chirp{
+		Id:        retrievedChirp.ID,
+		CreatedAt: retrievedChirp.CreatedAt,
+		UpdatedAt: retrievedChirp.UpdatedAt,
+		Body:      retrievedChirp.Body,
+		UserId:    retrievedChirp.UserID,
+	}
+
+	respondWithJSON(w, http.StatusOK, chirp)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -232,6 +264,7 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetMetrics)
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
 	mux.HandleFunc("GET /api/chirps", apiCfg.retrieveChirps)
+	mux.HandleFunc("GET /api/chirps/", apiCfg.getChirpById)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
