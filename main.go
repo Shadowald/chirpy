@@ -50,9 +50,15 @@ func (cfg *apiConfig) getFileserverHits(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(fmt.Sprintf(template, cfg.fileserverHits.Load())))
 }
 
-func (cfg *apiConfig) resetFileserverHits(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) resetMetrics(w http.ResponseWriter, r *http.Request) {
 	if cfg.platform != "dev" {
 		respondWithError(w, http.StatusForbidden, "Resetting metrics is only allowed in dev environment")
+		return
+	}
+	databaseErr := cfg.dbQueries.ResetUsers(r.Context())
+	if databaseErr != nil {
+		log.Printf("Error resetting users: %v", databaseErr)
+		respondWithError(w, http.StatusInternalServerError, "Error resetting users")
 		return
 	}
 	cfg.fileserverHits.Store(0)
@@ -189,7 +195,7 @@ func main() {
 	})
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileserverHits)
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetMetrics)
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
 	server := &http.Server{
 		Addr:    ":8080",
