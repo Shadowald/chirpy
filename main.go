@@ -188,6 +188,28 @@ func (cfg *apiConfig) postChirp(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, http.StatusCreated, chirp)
 }
 
+func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, req *http.Request) {
+	retrievedChirps, err := cfg.dbQueries.RetrieveChirps(req.Context())
+	if err != nil {
+		log.Printf("Error retrieving chirps: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error retrieving chirps")
+		return
+	}
+
+	chirps := make([]Chirp, len(retrievedChirps))
+	for i := range retrievedChirps {
+		chirps[i] = Chirp{
+			Id:        retrievedChirps[i].ID,
+			CreatedAt: retrievedChirps[i].CreatedAt,
+			UpdatedAt: retrievedChirps[i].UpdatedAt,
+			Body:      retrievedChirps[i].Body,
+			UserId:    retrievedChirps[i].UserID,
+		}
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -209,6 +231,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetMetrics)
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
+	mux.HandleFunc("GET /api/chirps", apiCfg.retrieveChirps)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
