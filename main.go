@@ -19,6 +19,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -41,6 +42,10 @@ func (cfg *apiConfig) getFileserverHits(w http.ResponseWriter, r *http.Request) 
 }
 
 func (cfg *apiConfig) resetFileserverHits(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(w, http.StatusForbidden, "Resetting metrics is only allowed in dev environment")
+		return
+	}
 	cfg.fileserverHits.Store(0)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -173,7 +178,8 @@ func main() {
 		log.Fatalf("Error opening database: %v", err)
 	}
 	dbQueries := database.New(db)
-	apiCfg := &apiConfig{dbQueries: dbQueries}
+	platform := os.Getenv("PLATFORM")
+	apiCfg := &apiConfig{dbQueries: dbQueries, platform: platform}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
