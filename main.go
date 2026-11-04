@@ -31,6 +31,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type Chirp struct {
+	Id        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserId    uuid.UUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -86,31 +94,7 @@ func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 }
 
 func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
-	type returnVals struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-	respBody := returnVals{
-		CleanedBody: payload.(string),
-	}
-	data, err := json.Marshal(respBody)
-	if err != nil {
-		log.Printf("Error marshaling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	w.Write(data)
-}
-
-func respondWithJSONUser(w http.ResponseWriter, statusCode int, payload interface{}) {
-	respBody := User{
-		Id:        payload.(database.User).ID,
-		CreatedAt: payload.(database.User).CreatedAt,
-		UpdatedAt: payload.(database.User).UpdatedAt,
-		Email:     payload.(database.User).Email,
-	}
-	data, err := json.Marshal(respBody)
+	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("Error marshaling JSON: %s", err)
 		w.WriteHeader(500)
@@ -136,23 +120,18 @@ func censorChirp(chirp string) string {
 	return cleaned_chirp
 }
 
-func validateChirp(w http.ResponseWriter, req *http.Request) {
-	type Chirp struct {
-		Body string `json:"body"`
-	}
+func validateChirp(req *http.Request) (Chirp, int, string) {
 	decoder := json.NewDecoder(req.Body)
 	chirp := Chirp{}
 	err := decoder.Decode(&chirp)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
-		return
+		return Chirp{}, http.StatusBadRequest, "Invalid JSON"
 	}
 	if len(chirp.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-		return
+		return Chirp{}, http.StatusBadRequest, "Chirp is too long"
 	}
 	chirp.Body = censorChirp(chirp.Body)
-	respondWithJSON(w, http.StatusOK, chirp.Body)
+	return chirp, 0, ""
 }
 
 func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
@@ -173,7 +152,40 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, "Error creating user")
 		return
 	}
-	respondWithJSONUser(w, http.StatusCreated, newUser)
+	user = User{
+		Id:        newUser.ID,
+		CreatedAt: newUser.CreatedAt,
+		UpdatedAt: newUser.UpdatedAt,
+		Email:     newUser.Email,
+	}
+	respondWithJSON(w, http.StatusCreated, user)
+}
+
+func (cfg *apiConfig) postChirp(w http.ResponseWriter, req *http.Request) {
+	validatedChirp, statusCode, errMessage := validateChirp(req)
+	if statusCode != 0 {
+		respondWithError(w, statusCode, errMessage)
+		return
+	}
+
+	newChirp, err := cfg.dbQueries.CreateChirp(req.Context(), database.CreateChirpParams{
+		Body:   validatedChirp.Body,
+		UserID: validatedChirp.UserId,
+	})
+	if err != nil {
+		log.Printf("Error creating chirp: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error creating chirp")
+		return
+	}
+	chirp := Chirp{
+		Id:        newChirp.ID,
+		CreatedAt: newChirp.CreatedAt,
+		UpdatedAt: newChirp.UpdatedAt,
+		Body:      newChirp.Body,
+		UserId:    newChirp.UserID,
+	}
+
+	respondWithJSON(w, http.StatusCreated, chirp)
 }
 
 func main() {
@@ -193,7 +205,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	mux.HandleFunc("POST /api/chirps", apiCfg.postChirp)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetMetrics)
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
