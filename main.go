@@ -83,6 +83,30 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	w.Write(data)
 }
 
+func respondWithJSONUser(w http.ResponseWriter, statusCode int, payload interface{}) {
+	type returnVals struct {
+		Id        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Email     string `json:"email"`
+	}
+	respBody := returnVals{
+		Id:        payload.(database.User).ID.String(),
+		CreatedAt: payload.(database.User).CreatedAt.String(),
+		UpdatedAt: payload.(database.User).UpdatedAt.String(),
+		Email:     payload.(database.User).Email,
+	}
+	data, err := json.Marshal(respBody)
+	if err != nil {
+		log.Printf("Error marshaling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	w.Write(data)
+}
+
 func censorChirp(chirp string) string {
 	censoredWords := []string{"kerfuffle", "sharbert", "fornax"}
 	words := strings.Split(chirp, " ")
@@ -117,6 +141,30 @@ func validateChirp(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, http.StatusOK, chirp.Body)
 }
 
+func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
+	type User struct {
+		Email string `json:"email"`
+	}
+	decoder := json.NewDecoder(req.Body)
+	user := User{}
+	err := decoder.Decode(&user)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+	if user.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "Email is required")
+		return
+	}
+	newUser, err := cfg.dbQueries.CreateUser(req.Context(), user.Email)
+	if err != nil {
+		log.Printf("Error creating user: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error creating user")
+		return
+	}
+	respondWithJSONUser(w, http.StatusCreated, newUser)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -136,6 +184,7 @@ func main() {
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileserverHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileserverHits)
+	mux.HandleFunc("POST /api/users", apiCfg.addUser)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
