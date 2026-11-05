@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Shadowald/chirpy/internal/auth"
 	"github.com/Shadowald/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -28,6 +29,7 @@ type User struct {
 	Id        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Password  string    `json:"password"`
 	Email     string    `json:"email"`
 }
 
@@ -146,12 +148,24 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Email is required")
 		return
 	}
-	newUser, err := cfg.dbQueries.CreateUser(req.Context(), user.Email)
+
+	hashedPassword, err := auth.HashPassword(user.Password)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error hashing password")
+		return
+	}
+
+	newUser, err := cfg.dbQueries.CreateUser(req.Context(), database.CreateUserParams{
+		HashedPassword: hashedPassword,
+		Email:          user.Email,
+	})
 	if err != nil {
 		log.Printf("Error creating user: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Error creating user")
 		return
 	}
+
 	user = User{
 		Id:        newUser.ID,
 		CreatedAt: newUser.CreatedAt,
@@ -242,6 +256,39 @@ func (cfg *apiConfig) getChirpById(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, http.StatusOK, chirp)
 }
 
+func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+	user := User{}
+	err := decoder.Decode(&user)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+	if user.Email == "" || user.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "Email and password are required")
+		return
+	}
+	userFromDB, err := cfg.dbQueries.RetrieveUserByEmail(req.Context(), user.Email)
+	if err != nil {
+		log.Printf("Error retrieving user: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+	match, err := auth.CheckPasswordHash(user.Password, userFromDB.HashedPassword)
+	if err != nil || !match {
+		log.Printf("Error checking password: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+	user = User{
+		Id:        userFromDB.ID,
+		CreatedAt: userFromDB.CreatedAt,
+		UpdatedAt: userFromDB.UpdatedAt,
+		Email:     userFromDB.Email,
+	}
+	respondWithJSON(w, http.StatusOK, user)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -265,6 +312,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
 	mux.HandleFunc("GET /api/chirps", apiCfg.retrieveChirps)
 	mux.HandleFunc("GET /api/chirps/", apiCfg.getChirpById)
+	mux.HandleFunc("POST /api/login", apiCfg.userLogin)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
