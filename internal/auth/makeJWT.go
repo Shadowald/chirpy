@@ -2,9 +2,9 @@ package auth
 
 import (
 	"time"
-	"uuid"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
@@ -33,16 +33,16 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	})
 
 	if err != nil {
-		return uuid.Nil(), err
+		return uuid.Nil, err
 	}
 
 	if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && token.Valid {
 		userID, err := uuid.Parse(claims.Subject)
 		if err != nil {
-			return uuid.Nil(), err
+			return uuid.Nil, err
 		}
 		return userID, nil
 	}
 
-	return uuid.Nil(), jwt.ErrInvalidKey
+	return uuid.Nil, jwt.ErrInvalidKey
 }
