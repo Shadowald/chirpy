@@ -23,6 +23,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	jwtSecret      string
 }
 
 type User struct {
@@ -31,6 +32,7 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Password  string    `json:"password"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token"`
 }
 
 type Chirp struct {
@@ -176,6 +178,19 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
 }
 
 func (cfg *apiConfig) postChirp(w http.ResponseWriter, req *http.Request) {
+	bearerToken, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Error validating JWT: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+
 	validatedChirp, statusCode, errMessage := validateChirp(req)
 	if statusCode != 0 {
 		respondWithError(w, statusCode, errMessage)
@@ -184,7 +199,7 @@ func (cfg *apiConfig) postChirp(w http.ResponseWriter, req *http.Request) {
 
 	newChirp, err := cfg.dbQueries.CreateChirp(req.Context(), database.CreateChirpParams{
 		Body:   validatedChirp.Body,
-		UserID: validatedChirp.UserId,
+		UserID: userID,
 	})
 	if err != nil {
 		log.Printf("Error creating chirp: %v", err)
@@ -258,34 +273,54 @@ func (cfg *apiConfig) getChirpById(w http.ResponseWriter, req *http.Request) {
 
 func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
-	user := User{}
-	err := decoder.Decode(&user)
+	type Body struct {
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
+	}
+	body := Body{}
+	err := decoder.Decode(&body)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
-	if user.Email == "" || user.Password == "" {
+	if body.Email == "" || body.Password == "" {
 		respondWithError(w, http.StatusBadRequest, "Email and password are required")
 		return
 	}
-	userFromDB, err := cfg.dbQueries.RetrieveUserByEmail(req.Context(), user.Email)
+	userFromDB, err := cfg.dbQueries.RetrieveUserByEmail(req.Context(), body.Email)
 	if err != nil {
 		log.Printf("Error retrieving user: %v", err)
 		respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
-	match, err := auth.CheckPasswordHash(user.Password, userFromDB.HashedPassword)
+	match, err := auth.CheckPasswordHash(body.Password, userFromDB.HashedPassword)
 	if err != nil || !match {
 		log.Printf("Error checking password: %v", err)
 		respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
-	user = User{
+
+	user := User{
 		Id:        userFromDB.ID,
 		CreatedAt: userFromDB.CreatedAt,
 		UpdatedAt: userFromDB.UpdatedAt,
 		Email:     userFromDB.Email,
 	}
+
+	if body.ExpiresInSeconds <= 0 || body.ExpiresInSeconds > 3600 {
+		body.ExpiresInSeconds = 3600 // Default to 1 hour if not provided or invalid
+	}
+
+	token, err := auth.MakeJWT(user.Id, cfg.jwtSecret, time.Duration(body.ExpiresInSeconds)*time.Second)
+	if err != nil {
+		log.Printf("Error creating JWT: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error creating JWT")
+		return
+	}
+
+	user.Token = token
+
 	respondWithJSON(w, http.StatusOK, user)
 }
 
@@ -298,7 +333,8 @@ func main() {
 	}
 	dbQueries := database.New(db)
 	platform := os.Getenv("PLATFORM")
-	apiCfg := &apiConfig{dbQueries: dbQueries, platform: platform}
+	jwtSecret := os.Getenv("JWT_SECRET")
+	apiCfg := &apiConfig{dbQueries: dbQueries, platform: platform, jwtSecret: jwtSecret}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
