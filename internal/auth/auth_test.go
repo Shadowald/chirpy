@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
-	"uuid"
+
+	"github.com/google/uuid"
 )
 
 func TestHashPasswordAndCheck(t *testing.T) {
@@ -124,5 +126,35 @@ func TestValidateJWTWithValidToken(t *testing.T) {
 
 	if returnedUserID != userID {
 		t.Fatalf("Expected user ID %v, but got %v", userID, returnedUserID)
+	}
+}
+
+func TestGetBearerToken(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer mytoken")
+	token, err := GetBearerToken(headers)
+	if err != nil {
+		t.Fatalf("Error getting bearer token: %v", err)
+	}
+
+	if token != "mytoken" {
+		t.Fatalf("Expected token 'mytoken', but got '%s'", token)
+	}
+}
+
+func TestGetBearerTokenWithMissingHeader(t *testing.T) {
+	headers := make(http.Header)
+	_, err := GetBearerToken(headers)
+	if err == nil {
+		t.Fatalf("Expected error when getting bearer token with missing header, but got none")
+	}
+}
+
+func TestGetBearerTokenWithInvalidFormat(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Authorization", "InvalidFormat mytoken")
+	_, err := GetBearerToken(headers)
+	if err == nil {
+		t.Fatalf("Expected error when getting bearer token with invalid format, but got none")
 	}
 }
