@@ -158,3 +158,23 @@ func TestGetBearerTokenWithInvalidFormat(t *testing.T) {
 		t.Fatalf("Expected error when getting bearer token with invalid format, but got none")
 	}
 }
+
+func TestGetBearerTokenWithEmptyToken(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer ")
+	_, err := GetBearerToken(headers)
+	if err == nil {
+		t.Fatalf("Expected error when getting bearer token with empty token, but got none")
+	}
+}
+
+func TestMakeRefreshToken(t *testing.T) {
+	token, err := MakeRefreshToken()
+	if err != nil {
+		t.Fatalf("Error making refresh token: %v", err)
+	}
+
+	if len(token) != 64 {
+		t.Fatalf("Expected refresh token length of 64, but got %d", len(token))
+	}
+}
