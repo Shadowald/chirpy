@@ -337,6 +337,72 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request) {
 	respondWithJSON(w, http.StatusOK, user)
 }
 
+func (cfg *apiConfig) refreshToken(w http.ResponseWriter, req *http.Request) {
+	bearerToken, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	token, err := cfg.dbQueries.GetRefreshToken(req.Context(), bearerToken)
+	if err != nil {
+		log.Printf("Error retrieving refresh token: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid refresh token")
+		return
+	}
+
+	if token.ExpiresAt.Before(time.Now()) {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token has expired")
+		return
+	}
+
+	if token.RevokedAt.Valid {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token has been revoked")
+		return
+	}
+
+	accessToken, err := auth.MakeJWT(token.UserID, cfg.jwtSecret, time.Duration(1)*time.Hour)
+	if err != nil {
+		log.Printf("Error creating JWT: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error creating JWT")
+		return
+	}
+
+	response := map[string]string{
+		"token": accessToken,
+	}
+	respondWithJSON(w, http.StatusOK, response)
+}
+
+func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, req *http.Request) {
+	bearerToken, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	token, err := cfg.dbQueries.GetRefreshToken(req.Context(), bearerToken)
+	if err != nil {
+		log.Printf("Error retrieving refresh token: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid refresh token")
+		return
+	}
+
+	if token.RevokedAt.Valid {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token has already been revoked")
+		return
+	}
+
+	err = cfg.dbQueries.UpdateRevokeRefreshToken(req.Context(), bearerToken)
+	if err != nil {
+		log.Printf("Error revoking refresh token: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error revoking refresh token")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -362,6 +428,8 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", apiCfg.retrieveChirps)
 	mux.HandleFunc("GET /api/chirps/", apiCfg.getChirpById)
 	mux.HandleFunc("POST /api/login", apiCfg.userLogin)
+	mux.HandleFunc("POST /api/refresh", apiCfg.refreshToken)
+	mux.HandleFunc("POST /api/revoke", apiCfg.revokeRefreshToken)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
