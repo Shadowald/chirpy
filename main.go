@@ -27,12 +27,13 @@ type apiConfig struct {
 }
 
 type User struct {
-	Id        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Password  string    `json:"password"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token"`
+	Id           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Password     string    `json:"password"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 type Chirp struct {
@@ -274,9 +275,8 @@ func (cfg *apiConfig) getChirpById(w http.ResponseWriter, req *http.Request) {
 func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request) {
 	decoder := json.NewDecoder(req.Body)
 	type Body struct {
-		Email            string `json:"email"`
-		Password         string `json:"password"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	body := Body{}
 	err := decoder.Decode(&body)
@@ -308,19 +308,32 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request) {
 		Email:     userFromDB.Email,
 	}
 
-	if body.ExpiresInSeconds <= 0 || body.ExpiresInSeconds > 3600 {
-		body.ExpiresInSeconds = 3600 // Default to 1 hour if not provided or invalid
-	}
-
-	token, err := auth.MakeJWT(user.Id, cfg.jwtSecret, time.Duration(body.ExpiresInSeconds)*time.Second)
+	token, err := auth.MakeJWT(user.Id, cfg.jwtSecret, time.Duration(1)*time.Hour)
 	if err != nil {
 		log.Printf("Error creating JWT: %v", err)
 		respondWithError(w, http.StatusInternalServerError, "Error creating JWT")
 		return
 	}
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		log.Printf("Error creating refresh token: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error creating refresh token")
+		return
+	}
+
+	_, err = cfg.dbQueries.SaveRefreshToken(req.Context(), database.SaveRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    user.Id,
+		ExpiresAt: time.Now().Add(60 * 24 * time.Hour), // 60 days
+	})
+	if err != nil {
+		log.Printf("Error saving refresh token: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error saving refresh token")
+		return
+	}
 
 	user.Token = token
-
+	user.RefreshToken = refreshToken
 	respondWithJSON(w, http.StatusOK, user)
 }
 
