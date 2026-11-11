@@ -403,6 +403,52 @@ func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, req *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) updateUser(w http.ResponseWriter, req *http.Request) {
+	bearerToken, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Error validating JWT: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	user := User{}
+	err = decoder.Decode(&user)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(user.Password)
+	if err != nil {
+		log.Printf("Error hashing password: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error hashing password")
+		return
+	}
+
+	err = cfg.dbQueries.UpdateUser(req.Context(), database.UpdateUserParams{
+		ID:             userID,
+		HashedPassword: hashedPassword,
+		Email:          user.Email,
+	})
+	if err != nil {
+		log.Printf("Error updating user: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error updating user")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, User{
+		Id:    userID,
+		Email: user.Email,
+	})
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -430,6 +476,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiCfg.userLogin)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshToken)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeRefreshToken)
+	mux.HandleFunc("PUT /api/users", apiCfg.updateUser)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
