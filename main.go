@@ -449,6 +449,56 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, req *http.Request) {
+	bearerToken, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Error validating JWT: %v", err)
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+
+	chirpID := strings.TrimPrefix(req.URL.Path, "/api/chirps/")
+	if chirpID == "" {
+		respondWithError(w, http.StatusBadRequest, "Chirp ID is required")
+		return
+	}
+	chirpUUID, err := uuid.Parse(chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Chirp ID format")
+		return
+	}
+
+	userChirp, err := cfg.dbQueries.RetrieveChirpByID(req.Context(), chirpUUID)
+	if err != nil {
+		log.Printf("Error retrieving chirp: %v", err)
+		respondWithError(w, http.StatusNotFound, "Chirp not found")
+		return
+	}
+
+	if userChirp.UserID != userID {
+		respondWithError(w, http.StatusForbidden, "You are not authorized to delete this chirp")
+		return
+	}
+
+	err = cfg.dbQueries.DeleteChirp(req.Context(), database.DeleteChirpParams{
+		ID:     chirpUUID,
+		UserID: userID,
+	})
+	if err != nil {
+		log.Printf("Error deleting chirp: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error deleting chirp")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -477,6 +527,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshToken)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeRefreshToken)
 	mux.HandleFunc("PUT /api/users", apiCfg.updateUser)
+	mux.HandleFunc("DELETE /api/chirps/", apiCfg.deleteChirp)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
