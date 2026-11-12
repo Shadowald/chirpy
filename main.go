@@ -34,6 +34,7 @@ type User struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -170,10 +171,11 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, req *http.Request) {
 	}
 
 	user = User{
-		Id:        newUser.ID,
-		CreatedAt: newUser.CreatedAt,
-		UpdatedAt: newUser.UpdatedAt,
-		Email:     newUser.Email,
+		Id:          newUser.ID,
+		CreatedAt:   newUser.CreatedAt,
+		UpdatedAt:   newUser.UpdatedAt,
+		Email:       newUser.Email,
+		IsChirpyRed: newUser.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusCreated, user)
 }
@@ -302,10 +304,11 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, req *http.Request) {
 	}
 
 	user := User{
-		Id:        userFromDB.ID,
-		CreatedAt: userFromDB.CreatedAt,
-		UpdatedAt: userFromDB.UpdatedAt,
-		Email:     userFromDB.Email,
+		Id:          userFromDB.ID,
+		CreatedAt:   userFromDB.CreatedAt,
+		UpdatedAt:   userFromDB.UpdatedAt,
+		Email:       userFromDB.Email,
+		IsChirpyRed: userFromDB.IsChirpyRed,
 	}
 
 	token, err := auth.MakeJWT(user.Id, cfg.jwtSecret, time.Duration(1)*time.Hour)
@@ -499,6 +502,36 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) upgradeUserToChirpyRed(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+	type Body struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID uuid.UUID `json:"user_id"`
+		} `json:"data"`
+	}
+	body := Body{}
+	err := decoder.Decode(&body)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
+		return
+	}
+
+	if body.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	err = cfg.dbQueries.UpgradeUserToChirpyRed(req.Context(), body.Data.UserID)
+	if err != nil {
+		log.Printf("Error upgrading user to Chirpy Red: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Error upgrading user to Chirpy Red")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -528,6 +561,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeRefreshToken)
 	mux.HandleFunc("PUT /api/users", apiCfg.updateUser)
 	mux.HandleFunc("DELETE /api/chirps/", apiCfg.deleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.upgradeUserToChirpyRed)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
