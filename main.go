@@ -24,6 +24,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string
 	jwtSecret      string
+	polkaKey       string
 }
 
 type User struct {
@@ -503,6 +504,17 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, req *http.Request) {
 }
 
 func (cfg *apiConfig) upgradeUserToChirpyRed(w http.ResponseWriter, req *http.Request) {
+	polkaKey, err := auth.GetAPIKey(req.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	if polkaKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "Invalid Polka API key")
+		return
+	}
+
 	decoder := json.NewDecoder(req.Body)
 	type Body struct {
 		Event string `json:"event"`
@@ -511,7 +523,7 @@ func (cfg *apiConfig) upgradeUserToChirpyRed(w http.ResponseWriter, req *http.Re
 		} `json:"data"`
 	}
 	body := Body{}
-	err := decoder.Decode(&body)
+	err = decoder.Decode(&body)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid JSON")
 		return
@@ -542,7 +554,8 @@ func main() {
 	dbQueries := database.New(db)
 	platform := os.Getenv("PLATFORM")
 	jwtSecret := os.Getenv("JWT_SECRET")
-	apiCfg := &apiConfig{dbQueries: dbQueries, platform: platform, jwtSecret: jwtSecret}
+	polkaKey := os.Getenv("POLKA_KEY")
+	apiCfg := &apiConfig{dbQueries: dbQueries, platform: platform, jwtSecret: jwtSecret, polkaKey: polkaKey}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {

@@ -178,3 +178,7 @@ func TestMakeRefreshToken(t *testing.T) {
 		t.Fatalf("Expected refresh token length of 64, but got %d", len(token))
 	}
 }
+
+func TestGetAPIKey(t *testing.T) {
+
+}
