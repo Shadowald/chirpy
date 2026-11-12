@@ -16,5 +16,10 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", errors.New("invalid authorization header format")
 	}
 
-	return strings.TrimPrefix(authHeader, "Bearer "), nil
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		return "", errors.New("bearer token is empty")
+	}
+
+	return token, nil
 }

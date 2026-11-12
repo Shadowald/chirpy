@@ -16,5 +16,10 @@ func GetAPIKey(headers http.Header) (string, error) {
 		return "", errors.New("invalid authorization header format")
 	}
 
-	return strings.TrimPrefix(authHeader, "ApiKey "), nil
+	key := strings.TrimPrefix(authHeader, "ApiKey ")
+	if key == "" {
+		return "", errors.New("API key is empty")
+	}
+
+	return key, nil
 }
