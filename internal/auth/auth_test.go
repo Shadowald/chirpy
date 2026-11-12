@@ -180,5 +180,40 @@ func TestMakeRefreshToken(t *testing.T) {
 }
 
 func TestGetAPIKey(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Authorization", "ApiKey myapikey")
+	apiKey, err := GetAPIKey(headers)
+	if err != nil {
+		t.Fatalf("Error getting API key: %v", err)
+	}
 
+	if apiKey != "myapikey" {
+		t.Fatalf("Expected API key 'myapikey', but got '%s'", apiKey)
+	}
+}
+
+func TestGetAPIKeyWithMissingHeader(t *testing.T) {
+	headers := make(http.Header)
+	_, err := GetAPIKey(headers)
+	if err == nil {
+		t.Fatalf("Expected error when getting API key with missing header, but got none")
+	}
+}
+
+func TestGetAPIKeyWithInvalidFormat(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Authorization", "InvalidFormat myapikey")
+	_, err := GetAPIKey(headers)
+	if err == nil {
+		t.Fatalf("Expected error when getting API key with invalid format, but got none")
+	}
+}
+
+func TestGetAPIKeyWithEmptyKey(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Authorization", "ApiKey ")
+	_, err := GetAPIKey(headers)
+	if err == nil {
+		t.Fatalf("Expected error when getting API key with empty key, but got none")
+	}
 }
